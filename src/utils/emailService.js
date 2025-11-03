@@ -2,6 +2,16 @@ const nodemailer = require('nodemailer');
 
 class EmailService {
   constructor() {
+    console.log('🔧 INITIALIZING EMAIL SERVICE...');
+    console.log('📧 Email config check:', {
+      hasHost: !!process.env.EMAIL_HOST,
+      hasUser: !!process.env.EMAIL_USER,
+      hasPass: !!process.env.EMAIL_PASS ? '***' + process.env.EMAIL_PASS.slice(-3) : 'missing',
+      hasFromEmail: !!process.env.FROM_EMAIL,
+      hasFromName: !!process.env.FROM_NAME,
+      emailPort: process.env.EMAIL_PORT || '587 (default)'
+    });
+    
     this.isConfigured = false;
     this.transporter = null;
     this.initializeTransporter();
@@ -442,10 +452,16 @@ Reply to: ${formData.email}
     return text.replace(/[&<>"']/g, m => map[m]);
   }
 
-  // Method to check if email service is ready
-  isReady() {
-    return this.isConfigured && this.transporter;
-  }
+// Method to check if email service is ready
+isReady() {
+  const status = this.isConfigured && this.transporter;
+  console.log('📧 Email service readiness check:', {
+    isConfigured: this.isConfigured,
+    hasTransporter: !!this.transporter,
+    overallReady: status
+  });
+  return status;
+}
 
   // Method to get service status
   getStatus() {

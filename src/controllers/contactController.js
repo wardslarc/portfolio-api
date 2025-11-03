@@ -164,22 +164,77 @@ const getSubmissionStats = async (req, res) => {
 
 const getContactHealth = async (req, res) => {
   try {
-    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-    const emailStatus = emailService.isReady ? emailService.isReady() : false;
+    console.log('🔍 RUNNING HEALTH CHECK...');
     
-    res.json({
-      success: true,
-      service: 'contact',
+    // Check MongoDB connection
+    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    console.log('📊 MongoDB readyState:', mongoose.connection.readyState, 'Status:', dbStatus);
+    
+    // Check email service
+    let emailStatus = false;
+    let emailError = null;
+    try {
+      emailStatus = emailService.isReady ? emailService.isReady() : false;
+      console.log('📧 Email service status:', emailStatus);
+    } catch (emailHealthError) {
+      emailError = emailHealthError.message;
+      console.log('❌ Email service health check error:', emailError);
+    }
+    
+    // Test database connection with a simple query
+    let dbTest = false;
+    let dbError = null;
+    if (dbStatus === 'connected') {
+      try {
+        // Try a simple count query to test database responsiveness
+        const testCount = await Contact.countDocuments().limit(1).maxTimeMS(5000);
+        dbTest = true;
+        console.log('✅ Database test query successful');
+      } catch (dbTestError) {
+        dbError = dbTestError.message;
+        console.log('❌ Database test query failed:', dbError);
+      }
+    }
+    
+    const overallHealth = dbStatus === 'connected' && emailStatus;
+    
+    console.log('🏥 HEALTH CHECK COMPLETE:', {
+      overall: overallHealth ? 'healthy' : 'unhealthy',
       database: dbStatus,
-      emailService: emailStatus,
-      timestamp: new Date().toISOString()
+      databaseTest: dbTest,
+      emailService: emailStatus
     });
+    
+    if (overallHealth) {
+      res.json({
+        success: true,
+        service: 'contact',
+        status: 'healthy',
+        database: dbStatus,
+        databaseTest: dbTest,
+        emailService: emailStatus,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(503).json({
+        success: false,
+        service: 'contact',
+        status: 'unhealthy',
+        database: dbStatus,
+        databaseTest: dbTest,
+        databaseError: dbError,
+        emailService: emailStatus,
+        emailError: emailError,
+        timestamp: new Date().toISOString()
+      });
+    }
   } catch (error) {
-    console.error('Contact health check error:', error.message);
+    console.error('💥 HEALTH CHECK ERROR:', error.message);
     res.status(503).json({
       success: false,
       service: 'contact',
       status: 'unhealthy',
+      error: error.message,
       timestamp: new Date().toISOString()
     });
   }
