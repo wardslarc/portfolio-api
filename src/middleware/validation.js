@@ -3,11 +3,13 @@ const { body, validationResult } = require('express-validator');
 const validateContact = [
   // Add debug logging to see what's being received
   (req, res, next) => {
-    console.log('Received contact form data:', {
-      body: req.body,
-      headers: req.headers['content-type'],
-      method: req.method,
-      timestamp: new Date().toISOString()
+    console.log('Validation middleware - received data:', {
+      name: req.body.name?.substring(0, 10),
+      email: req.body.email?.substring(0, 10),
+      subject: req.body.subject?.substring(0, 10),
+      messageLength: req.body.message?.length,
+      honeypot: req.body.honeypot,
+      timestamp: req.body.timestamp
     });
     next();
   },
@@ -16,8 +18,6 @@ const validateContact = [
     .trim()
     .isLength({ min: 2, max: 50 })
     .withMessage('Name must be between 2 and 50 characters')
-    .matches(/^[a-zA-Z\s\-'.]+$/)
-    .withMessage('Name can only contain letters, spaces, hyphens, and apostrophes')
     .escape(),
   
   body('email')
@@ -71,18 +71,8 @@ const validateContact = [
     const errors = validationResult(req);
     
     if (!errors.isEmpty()) {
-      console.log('Validation errors:', {
-        errors: errors.array(),
-        receivedData: {
-          name: req.body.name?.substring(0, 10) + '...',
-          email: req.body.email?.substring(0, 5) + '...',
-          subject: req.body.subject?.substring(0, 10) + '...',
-          messageLength: req.body.message?.length,
-          honeypot: req.body.honeypot,
-          timestamp: req.body.timestamp
-        }
-      });
-
+      console.log('Validation errors:', errors.array());
+      
       const firstError = errors.array()[0];
       return res.status(400).json({
         success: false,
@@ -90,7 +80,37 @@ const validateContact = [
       });
     }
     
-    console.log('Validation passed for contact form');
+    console.log('Validation passed');
     next();
   }
 ];
+
+const validateStats = [
+  body('email')
+    .isEmail()
+    .withMessage('Valid email is required')
+    .normalizeEmail(),
+  
+  body('ipAddress')
+    .isIP()
+    .withMessage('Valid IP address is required'),
+
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.log('Stats validation failed:', errors.array());
+      
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid request parameters'
+      });
+    }
+    next();
+  }
+];
+
+// Make sure to export the functions
+module.exports = {
+  validateContact,
+  validateStats
+};

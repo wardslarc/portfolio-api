@@ -1,77 +1,56 @@
 const Contact = require('../models/Contact');
 const emailService = require('../utils/emailService');
+const mongoose = require('mongoose'); // Add this import
 
 const submitContact = async (req, res) => {
-  let contactData = null;
+  console.log('Starting contact submission process...');
   
   try {
     const { name, email, subject, message, honeypot, timestamp } = req.body;
 
-    // Validate required fields
+    console.log('Received data:', { name, email, subject, message: message?.substring(0, 50) + '...' });
+
+    // Basic validation
     if (!name || !email || !subject || !message) {
+      console.log('Missing required fields');
       return res.status(400).json({
         success: false,
         message: 'All fields are required'
       });
     }
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide a valid email address'
-      });
-    }
-
-    // Honeypot check - silent success for bots
+    // Honeypot check
     if (honeypot && honeypot.length > 0) {
-      console.log('Honeypot triggered:', { 
-        email: email.substring(0, 3) + '***', // Partial email for logging
-        ip: req.ip ? req.ip.substring(0, 7) + '***' : 'unknown'
-      });
+      console.log('Honeypot triggered');
       return res.status(200).json({
         success: true,
         message: 'Thank you for your message!'
       });
     }
 
-    // Timing check - prevent automated submissions
-    const formFillTime = Date.now() - parseInt(timestamp);
-    if (formFillTime < 3000) { // Reduced to 3 seconds for better UX
-      console.log('Form filled too quickly:', { 
-        time: formFillTime + 'ms',
-        ip: req.ip ? req.ip.substring(0, 7) + '***' : 'unknown'
-      });
-      return res.status(200).json({ // Return 200 to not reveal anti-spam measures
-        success: true,
-        message: 'Thank you for your message!'
-      });
-    }
-
-    const ipAddress = req.ip || req.connection.remoteAddress || req.socket.remoteAddress;
+    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
     const userAgent = req.get('User-Agent') || 'Unknown';
 
+    console.log('Checking submission limits...');
     // Check submission limits
     const submissionCheck = await Contact.checkSubmissionLimit(email, ipAddress);
     
     if (submissionCheck.isOverLimit) {
-      console.log('Submission limit reached:', { 
-        email: email.substring(0, 3) + '***',
-        ip: ipAddress ? ipAddress.substring(0, 7) + '***' : 'unknown'
-      });
+      console.log('Submission limit reached');
       return res.status(429).json({
         success: false,
         message: 'You have reached the submission limit. Please try again in 24 hours.'
       });
     }
 
+    console.log('Calculating spam score...');
     // Calculate spam score
     const spamScore = Contact.calculateSpamScore({ name, email, subject, message });
     const isSpam = spamScore >= 5;
 
+    console.log('Creating contact entry...');
     // Create contact entry
-    contactData = {
+    const contactData = {
       name: name.trim(),
       email: email.toLowerCase().trim(),
       subject: subject.trim(),
@@ -84,85 +63,34 @@ const submitContact = async (req, res) => {
 
     const contact = new Contact(contactData);
     await contact.save();
+    console.log('Contact saved to database with ID:', contact._id);
 
-    let emailResults = { confirmation: false, notification: false };
-
-    // Send emails (don't await to avoid blocking response)
+    // Send emails if not spam - MAKE SURE THIS CODE IS EXECUTING
     if (!isSpam) {
+      console.log('Sending emails...');
       try {
-        // Send confirmation email to user
-        const confirmationPromise = emailService.sendConfirmationEmail(email, name, { subject, message })
-          .then(result => {
-            if (result.success) {
-              console.log('Confirmation email sent successfully to:', email.substring(0, 3) + '***');
-              emailResults.confirmation = true;
-            } else {
-              console.error('Failed to send confirmation email to:', email.substring(0, 3) + '***');
-            }
-            return result;
-          })
-          .catch(error => {
-            console.error('Error sending confirmation email:', error.message);
-            return { success: false, error: error.message };
-          });
+        // Send confirmation email
+        const confirmationResult = await emailService.sendConfirmationEmail(email, name, { subject, message });
+        console.log('Confirmation email result:', confirmationResult);
 
-        // Send notification email to admin
-        const notificationPromise = emailService.sendAdminNotification({ name, email, subject, message }, ipAddress)
-          .then(result => {
-            if (result.success) {
-              console.log('Admin notification sent successfully');
-              emailResults.notification = true;
-            } else {
-              console.error('Failed to send admin notification');
-            }
-            return result;
-          })
-          .catch(error => {
-            console.error('Error sending admin notification:', error.message);
-            return { success: false, error: error.message };
-          });
-
-        // Wait for both emails but don't block response
-        Promise.allSettled([confirmationPromise, notificationPromise])
-          .then(results => {
-            console.log('Email sending completed:', {
-              confirmation: results[0].status,
-              notification: results[1].status
-            });
-          });
-
+        // Send admin notification
+        const adminResult = await emailService.sendAdminNotification({ name, email, subject, message }, ipAddress);
+        console.log('Admin notification result:', adminResult);
       } catch (emailError) {
-        console.error('Email setup error:', emailError.message);
+        console.error('Email sending error:', emailError.message);
       }
+    } else {
+      console.log('Message marked as spam, skipping emails. Spam score:', spamScore);
     }
 
-    // Log submission for monitoring (sanitized)
-    console.log(`Contact form submitted:`, {
-      email: email.substring(0, 3) + '***',
-      ip: ipAddress ? ipAddress.substring(0, 7) + '***' : 'unknown',
-      spamScore,
-      isSpam,
-      timestamp: new Date().toISOString()
-    });
-
-    // Always return same success message regardless of spam status
     res.status(200).json({
       success: true,
-      message: 'Thank you for your message! I\'ll get back to you as soon as possible.'
+      message: 'Thank you for your message! I\'ll get back to you as soon as possible.',
+      isSpam
     });
 
   } catch (error) {
-    console.error('Contact submission error:', {
-      message: error.message,
-      name: error.name,
-      timestamp: new Date().toISOString(),
-      contactData: contactData ? {
-        email: contactData.email ? contactData.email.substring(0, 3) + '***' : 'unknown',
-        name: contactData.name ? contactData.name.substring(0, 2) + '***' : 'unknown'
-      } : null
-    });
-
-    // Generic error response - never reveal internal details
+    console.error('Contact submission error:', error);
     res.status(500).json({
       success: false,
       message: 'There was an error submitting your message. Please try again later.'
@@ -177,16 +105,7 @@ const getSubmissionStats = async (req, res) => {
     if (!email || !ipAddress) {
       return res.status(400).json({
         success: false,
-        message: 'Required parameters missing'
-      });
-    }
-
-    // Basic validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid email format'
+        message: 'Email and IP address are required'
       });
     }
 
@@ -199,11 +118,7 @@ const getSubmissionStats = async (req, res) => {
       remaining: Math.max(0, 3 - stats.emailCount)
     });
   } catch (error) {
-    console.error('Stats error:', {
-      message: error.message,
-      timestamp: new Date().toISOString()
-    });
-    
+    console.error('Stats error:', error);
     res.status(500).json({ 
       success: false,
       message: 'Failed to get submission stats' 
@@ -211,16 +126,19 @@ const getSubmissionStats = async (req, res) => {
   }
 };
 
-// Optional: Add a health check for the contact service
 const getContactHealth = async (req, res) => {
   try {
     // Test database connection
     const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
     
+    // Test email service
+    const emailStatus = emailService.isReady ? emailService.isReady() : false;
+    
     res.json({
       success: true,
       service: 'contact',
       database: dbStatus,
+      emailService: emailStatus,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -234,6 +152,7 @@ const getContactHealth = async (req, res) => {
   }
 };
 
+// Make sure all functions are exported
 module.exports = {
   submitContact,
   getSubmissionStats,

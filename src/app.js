@@ -3,8 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
-const contactRoutes = require('./routes/contact');
-const emailService = require('./utils/emailService');
+const contactRoutes = require('./routes/contact'); // Not contact-debug
 
 const app = express();
 

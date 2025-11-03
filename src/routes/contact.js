@@ -1,32 +1,15 @@
 const express = require('express');
+const { submitContact, getSubmissionStats, getContactHealth } = require('../controllers/contactController');
+const { validateContact, validateStats } = require('../middleware/validation');
+
 const router = express.Router();
 
-// Simple test route
-router.post('/submit', (req, res) => {
-  console.log('Received contact form submission');
-  res.json({
-    success: true,
-    message: 'Form submitted successfully (test version)'
-  });
-});
+console.log('Setting up contact routes...');
 
-// Simple stats route
-router.get('/stats', (req, res) => {
-  res.json({
-    emailCount: 0,
-    ipCount: 0,
-    remaining: 3
-  });
-});
+// Main routes
+router.post('/submit', validateContact, submitContact);
+router.get('/stats', validateStats, getSubmissionStats);
+router.get('/health', getContactHealth);
 
-// Simple health check
-router.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    service: 'contact',
-    timestamp: new Date().toISOString()
-  });
-});
-
-console.log('Contact routes loaded successfully');
+console.log('Contact routes setup complete');
 module.exports = router;
