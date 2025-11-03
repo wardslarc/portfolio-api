@@ -26,15 +26,68 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Simple MongoDB Connection for Vercel
+const connectDB = async () => {
+  if (!process.env.MONGODB_URI) {
+    console.error('❌ MONGODB_URI is not defined');
+    return false;
+  }
+
+  try {
+    console.log('🔗 Connecting to MongoDB...');
+    
+    // Remove all deprecated options, keep it simple
+    const mongooseOptions = {
+      serverSelectionTimeoutMS: 10000, // 10 seconds
+      socketTimeoutMS: 45000, // 45 seconds
+    };
+
+    await mongoose.connect(process.env.MONGODB_URI, mongooseOptions);
+    
+    console.log('✅ MongoDB connected successfully');
+    console.log('📊 MongoDB connection state:', mongoose.connection.readyState);
+    return true;
+    
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error.message);
+    return false;
+  }
+};
+
+// Connect to MongoDB when app starts
+connectDB();
+
+// MongoDB connection events
+mongoose.connection.on('connected', () => {
+  console.log('✅ MongoDB connected event');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB connection error:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️ MongoDB disconnected');
+});
+
 // Routes
 app.use('/api/contact', contactRoutes);
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const dbStates = {
+    0: 'disconnected',
+    1: 'connected', 
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+    mongodb: dbStates[dbState] || 'unknown',
+    readyState: dbState
   });
 });
 
@@ -48,41 +101,6 @@ app.use((err, req, res, next) => {
   console.error('Error:', err.message);
   res.status(500).json({ error: 'Something went wrong' });
 });
-
-// MongoDB Connection with updated settings
-if (process.env.MONGODB_URI) {
-  const mongooseOptions = {
-    serverSelectionTimeoutMS: 5000, // Timeout after 5s
-    socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
-    maxPoolSize: 10, // Maintain up to 10 socket connections
-    minPoolSize: 1, // Maintain at least 1 socket connection
-    maxIdleTimeMS: 30000, // Close idle connections after 30s
-    retryWrites: true,
-    retryReads: true,
-  };
-
-  mongoose.connect(process.env.MONGODB_URI, mongooseOptions)
-    .then(() => console.log('✅ Connected to MongoDB'))
-    .catch(err => {
-      console.error('❌ MongoDB connection error:', err.message);
-      console.log('💡 Check your MONGODB_URI in environment variables');
-    });
-
-  // Handle connection events
-  mongoose.connection.on('error', err => {
-    console.error('❌ MongoDB connection error:', err);
-  });
-
-  mongoose.connection.on('disconnected', () => {
-    console.log('⚠️ MongoDB disconnected');
-  });
-
-  mongoose.connection.on('reconnected', () => {
-    console.log('✅ MongoDB reconnected');
-  });
-} else {
-  console.error('❌ MONGODB_URI is not defined in environment variables');
-}
 
 module.exports = app;
 

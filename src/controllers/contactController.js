@@ -2,6 +2,36 @@ const Contact = require('../models/Contact');
 const emailService = require('../utils/emailService');
 const mongoose = require('mongoose');
 
+// Database connection helper for serverless environment
+const ensureDBConnection = async () => {
+  if (mongoose.connection.readyState === 1) {
+    console.log('📊 MongoDB already connected');
+    return true;
+  }
+
+  console.log('🔄 MongoDB disconnected, attempting to reconnect...');
+  
+  try {
+    // Close any existing connection that might be in a bad state
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.connection.close();
+    }
+    
+    // Reconnect with simple options
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 30000,
+    });
+    
+    console.log('✅ MongoDB reconnected successfully');
+    console.log('📊 New connection state:', mongoose.connection.readyState);
+    return true;
+  } catch (error) {
+    console.error('❌ MongoDB reconnection failed:', error.message);
+    return false;
+  }
+};
+
 const submitContact = async (req, res) => {
   console.log('🚀 STARTING CONTACT SUBMISSION PROCESS...');
   
@@ -38,8 +68,11 @@ const submitContact = async (req, res) => {
     const userAgent = req.get('User-Agent') || 'Unknown';
 
     console.log('🔍 CHECKING MONGODB CONNECTION...');
-    console.log('📊 MongoDB readyState:', mongoose.connection.readyState);
     
+    // Ensure database connection before proceeding
+    const isDbConnected = await ensureDBConnection();
+    console.log('📊 Database connection result:', isDbConnected);
+
     // Calculate spam score
     const spamScore = Contact.calculateSpamScore ? Contact.calculateSpamScore({ name, email, subject, message }) : 0;
     const isSpam = spamScore >= 5;
@@ -48,8 +81,8 @@ const submitContact = async (req, res) => {
     // Try to save to database
     let dbSuccess = false;
     let savedContactId = null;
-    
-    if (mongoose.connection.readyState === 1) {
+
+    if (isDbConnected) {
       console.log('💾 ATTEMPTING TO SAVE TO DATABASE...');
       try {
         const contactData = {
@@ -73,6 +106,23 @@ const submitContact = async (req, res) => {
       } catch (saveError) {
         console.log('❌ DATABASE SAVE ERROR:', saveError.message);
         console.log('💾 ERROR DETAILS:', saveError);
+        
+        // If it's a connection error, try one more reconnection
+        if (saveError.name === 'MongoNetworkError' || saveError.message.includes('connection')) {
+          console.log('🔄 Retrying database connection after save error...');
+          const retryConnected = await ensureDBConnection();
+          if (retryConnected) {
+            try {
+              const contact = new Contact(contactData);
+              const savedContact = await contact.save();
+              savedContactId = savedContact._id;
+              dbSuccess = true;
+              console.log('✅ SUCCESS: Contact saved on retry with ID:', savedContactId);
+            } catch (retryError) {
+              console.log('❌ Database save failed on retry:', retryError.message);
+            }
+          }
+        }
       }
     } else {
       console.log('⚠️ MONGODB NOT CONNECTED, SKIPPING DATABASE SAVE');
@@ -145,6 +195,9 @@ const getSubmissionStats = async (req, res) => {
       });
     }
 
+    // Ensure database connection first
+    await ensureDBConnection();
+    
     const stats = await Contact.checkSubmissionLimit(email, ipAddress);
     
     res.json({
