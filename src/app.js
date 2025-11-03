@@ -16,13 +16,14 @@ emailService.verifyTransporter();
 // Enhanced CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
   'http://localhost:3000',
+  'https://www.carlsdaleescalo.com',
   'https://carlsdaleescalo.com',
   'http://localhost:5173'
 ];
 
 // Security middleware
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "same-site" },
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Changed for Vercel
   hidePoweredBy: true,
   hsts: {
     maxAge: 31536000,
@@ -31,60 +32,20 @@ app.use(helmet({
   }
 }));
 
-// Simple rate limiting without external package
-const rateLimit = new Map();
-
-app.use('/api/', (req, res, next) => {
-  const ip = req.ip || req.connection.remoteAddress;
-  const now = Date.now();
-  const windowMs = 15 * 60 * 1000; // 15 minutes
-  const maxRequests = 100;
-  
-  if (!rateLimit.has(ip)) {
-    rateLimit.set(ip, { count: 1, startTime: now });
-    return next();
-  }
-  
-  const ipData = rateLimit.get(ip);
-  
-  // Reset if window has passed
-  if (now - ipData.startTime > windowMs) {
-    ipData.count = 1;
-    ipData.startTime = now;
-    return next();
-  }
-  
-  // Check if over limit
-  if (ipData.count >= maxRequests) {
-    return res.status(429).json({
-      error: 'Too many requests from this IP, please try again later.'
-    });
-  }
-  
-  // Increment count
-  ipData.count++;
-  next();
-});
-
-// Clean up old rate limit entries periodically
-setInterval(() => {
-  const now = Date.now();
-  const windowMs = 15 * 60 * 1000;
-  
-  for (const [ip, data] of rateLimit.entries()) {
-    if (now - data.startTime > windowMs) {
-      rateLimit.delete(ip);
-    }
-  }
-}, 60 * 1000); // Clean every minute
-
-// CORS middleware - apply to all routes
+// Enhanced CORS middleware
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
+    // Allow requests with no origin (like mobile apps, server-to-server, or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.includes(origin)) {
+    // Check if origin is in allowed list or is a subdomain of allowed domains
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      return origin === allowedOrigin || 
+             origin === allowedOrigin.replace('https://', 'https://www.') ||
+             origin === allowedOrigin.replace('https://www.', 'https://');
+    });
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
       console.log('Blocked by CORS:', origin);
@@ -92,9 +53,27 @@ app.use(cors({
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers'
+  ],
+  exposedHeaders: [
+    'Content-Range',
+    'X-Content-Range'
+  ],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+  maxAge: 86400 // 24 hours
 }));
+
+// Handle preflight requests globally
+app.options('*', cors());
 
 // Body parsing middleware
 app.use(express.json({ limit: '10kb' }));
@@ -115,7 +94,6 @@ app.get('/api/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
-    // Removed allowedOrigins from response to avoid info leak
   });
 });
 
@@ -132,27 +110,6 @@ app.use((err, req, res, next) => {
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({ 
       error: 'Access forbidden' 
-    });
-  }
-  
-  // Mongoose validation errors
-  if (err.name === 'ValidationError') {
-    return res.status(400).json({
-      error: 'Validation failed'
-    });
-  }
-  
-  // Mongoose cast errors (invalid ObjectId)
-  if (err.name === 'CastError') {
-    return res.status(400).json({
-      error: 'Invalid resource identifier'
-    });
-  }
-  
-  // MongoDB duplicate key errors
-  if (err.code === 11000) {
-    return res.status(409).json({
-      error: 'Resource already exists'
     });
   }
   
@@ -173,37 +130,15 @@ app.use((req, res) => {
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
   console.error('❌ MONGODB_URI is not defined in environment variables');
-  process.exit(1); // Exit if no database connection
+  process.exit(1);
 } else {
   mongoose.connect(MONGODB_URI)
     .then(() => console.log('✅ Connected to MongoDB'))
     .catch(err => {
       console.error('❌ MongoDB connection error:', err.message);
-      process.exit(1); // Exit on connection failure
+      process.exit(1);
     });
 }
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('🛑 Uncaught Exception:', error);
-  process.exit(1);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('🛑 Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
 // Export the app for Vercel
 module.exports = app;
-
-// Only listen locally, not in Vercel
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  });
-}
