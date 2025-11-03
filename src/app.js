@@ -16,7 +16,7 @@ emailService.verifyTransporter();
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000','https://carlsdaleescalo.com','http://localhost:5173' ],
   credentials: true
 }));
 
