@@ -6,7 +6,6 @@ const mongoSanitize = require('express-mongo-sanitize');
 require('dotenv').config();
 
 const contactRoutes = require('./routes/contact');
-// FIXED: Correct the import path - remove one level since we're already in src folder
 const emailService = require('./utils/emailService');
 
 const app = express();
@@ -22,7 +21,62 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
 ];
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "same-site" },
+  hidePoweredBy: true,
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
+// Simple rate limiting without external package
+const rateLimit = new Map();
+
+app.use('/api/', (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000; // 15 minutes
+  const maxRequests = 100;
+  
+  if (!rateLimit.has(ip)) {
+    rateLimit.set(ip, { count: 1, startTime: now });
+    return next();
+  }
+  
+  const ipData = rateLimit.get(ip);
+  
+  // Reset if window has passed
+  if (now - ipData.startTime > windowMs) {
+    ipData.count = 1;
+    ipData.startTime = now;
+    return next();
+  }
+  
+  // Check if over limit
+  if (ipData.count >= maxRequests) {
+    return res.status(429).json({
+      error: 'Too many requests from this IP, please try again later.'
+    });
+  }
+  
+  // Increment count
+  ipData.count++;
+  next();
+});
+
+// Clean up old rate limit entries periodically
+setInterval(() => {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  
+  for (const [ip, data] of rateLimit.entries()) {
+    if (now - data.startTime > windowMs) {
+      rateLimit.delete(ip);
+    }
+  }
+}, 60 * 1000); // Clean every minute
 
 // CORS middleware - apply to all routes
 app.use(cors({
@@ -49,6 +103,9 @@ app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 // Data sanitization
 app.use(mongoSanitize());
 
+// Remove Express header
+app.disable('x-powered-by');
+
 // Routes
 app.use('/api/contact', contactRoutes);
 
@@ -57,42 +114,86 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    allowedOrigins: allowedOrigins
+    environment: process.env.NODE_ENV || 'development'
+    // Removed allowedOrigins from response to avoid info leak
   });
 });
 
-// Simple error handling
+// Enhanced error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  console.error('Server Error:', {
+    message: err.message,
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
   
   // CORS error handling
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({ 
-      error: 'CORS policy: Origin not allowed' 
+      error: 'Access forbidden' 
     });
   }
   
-  res.status(500).json({ error: 'Something went wrong!' });
+  // Mongoose validation errors
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      error: 'Validation failed'
+    });
+  }
+  
+  // Mongoose cast errors (invalid ObjectId)
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      error: 'Invalid resource identifier'
+    });
+  }
+  
+  // MongoDB duplicate key errors
+  if (err.code === 11000) {
+    return res.status(409).json({
+      error: 'Resource already exists'
+    });
+  }
+  
+  // Generic error response - never expose internal details
+  res.status(500).json({ 
+    error: 'Internal server error' 
+  });
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({ 
+    error: 'Resource not found' 
+  });
 });
 
 // Database connection with better error handling
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
   console.error('❌ MONGODB_URI is not defined in environment variables');
+  process.exit(1); // Exit if no database connection
 } else {
   mongoose.connect(MONGODB_URI)
     .then(() => console.log('✅ Connected to MongoDB'))
     .catch(err => {
       console.error('❌ MongoDB connection error:', err.message);
-      console.log('💡 Check your MONGODB_URI in environment variables');
+      process.exit(1); // Exit on connection failure
     });
 }
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('🛑 Uncaught Exception:', error);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🛑 Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
 
 // Export the app for Vercel
 module.exports = app;
@@ -103,6 +204,6 @@ if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-    console.log(`🌐 Allowed origins:`, allowedOrigins);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 }
