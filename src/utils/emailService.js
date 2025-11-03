@@ -2,25 +2,14 @@ const nodemailer = require('nodemailer');
 
 class EmailService {
   constructor() {
-    console.log('🔧 INITIALIZING EMAIL SERVICE...');
-    console.log('📧 Email config check:', {
-      hasHost: !!process.env.EMAIL_HOST,
-      hasUser: !!process.env.EMAIL_USER,
-      hasPass: !!process.env.EMAIL_PASS ? '***' + process.env.EMAIL_PASS.slice(-3) : 'missing',
-      hasFromEmail: !!process.env.FROM_EMAIL,
-      hasFromName: !!process.env.FROM_NAME,
-      emailPort: process.env.EMAIL_PORT || '587 (default)'
-    });
-    
     this.isConfigured = false;
     this.transporter = null;
     this.initializeTransporter();
   }
 
   initializeTransporter() {
-    // Check if email configuration exists
     if (!process.env.EMAIL_HOST || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.warn('⚠️  Email configuration missing. Email service will be disabled.');
+      console.warn('Email configuration missing. Email service disabled.');
       this.isConfigured = false;
       return;
     }
@@ -29,67 +18,56 @@ class EmailService {
       this.transporter = nodemailer.createTransport({
         host: process.env.EMAIL_HOST,
         port: parseInt(process.env.EMAIL_PORT) || 587,
-        secure: process.env.EMAIL_PORT == 465, // true for 465, false for other ports
+        secure: process.env.EMAIL_PORT == 465,
         auth: {
           user: process.env.EMAIL_USER,
           pass: process.env.EMAIL_PASS,
         },
-        // Connection pool settings
         pool: true,
         maxConnections: 5,
         maxMessages: 100,
-        // Timeout settings
-        connectionTimeout: 10000, // 10 seconds
+        connectionTimeout: 10000,
         greetingTimeout: 10000,
-        socketTimeout: 30000, // 30 seconds
+        socketTimeout: 30000,
       });
 
       this.isConfigured = true;
-      console.log('✅ Email transporter initialized');
     } catch (error) {
-      console.error('❌ Email transporter initialization error:', error.message);
+      console.error('Email transporter initialization error:', error.message);
       this.isConfigured = false;
     }
   }
 
   async verifyTransporter() {
     if (!this.isConfigured) {
-      console.warn('⚠️  Email service not configured - skipping verification');
       return { success: false, error: 'Email service not configured' };
     }
 
     try {
       await this.transporter.verify();
-      console.log('✅ Email transporter verified and ready');
       return { success: true };
     } catch (error) {
-      console.error('❌ Email transporter verification failed:', error.message);
+      console.error('Email transporter verification failed:', error.message);
       this.isConfigured = false;
       return { 
         success: false, 
-        error: error.message,
-        code: 'TRANSPORTER_VERIFICATION_FAILED'
+        error: error.message
       };
     }
   }
 
   async sendConfirmationEmail(userEmail, userName, formData) {
-    // Check if email service is configured
     if (!this.isConfigured) {
-      console.warn('⚠️  Email service not configured - skipping confirmation email');
       return { 
         success: false, 
-        error: 'Email service not configured',
-        code: 'SERVICE_DISABLED'
+        error: 'Email service not configured'
       };
     }
 
-    // Validate input parameters
     if (!userEmail || !userName || !formData) {
       return {
         success: false,
-        error: 'Missing required parameters for confirmation email',
-        code: 'MISSING_PARAMETERS'
+        error: 'Missing required parameters'
       };
     }
 
@@ -98,60 +76,36 @@ class EmailService {
       to: userEmail,
       subject: 'Thank you for contacting us!',
       html: this.generateConfirmationTemplate(userName, formData),
-      // Text fallback for email clients that don't support HTML
       text: this.generateConfirmationText(userName, formData),
-      // Email headers for better deliverability
-      headers: {
-        'X-Priority': '3',
-        'X-MSMail-Priority': 'Normal',
-        'Importance': 'Normal'
-      }
     };
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('✅ Confirmation email sent:', {
-        messageId: info.messageId,
-        to: userEmail.substring(0, 3) + '***', // Partial email for logging
-        response: info.response?.substring(0, 100) // Truncated response
-      });
-      
       return { 
         success: true, 
-        messageId: info.messageId,
-        accepted: info.accepted,
-        rejected: info.rejected
+        messageId: info.messageId
       };
     } catch (error) {
-      console.error('❌ Error sending confirmation email:', {
-        error: error.message,
-        to: userEmail.substring(0, 3) + '***',
-        code: error.code
-      });
-      
+      console.error('Error sending confirmation email:', error.message);
       return { 
         success: false, 
-        error: error.message,
-        code: error.code || 'SEND_FAILED'
+        error: error.message
       };
     }
   }
 
   async sendAdminNotification(formData, ipAddress) {
     if (!this.isConfigured) {
-      console.warn('⚠️  Email service not configured - skipping admin notification');
       return { 
         success: false, 
-        error: 'Email service not configured',
-        code: 'SERVICE_DISABLED'
+        error: 'Email service not configured'
       };
     }
 
     if (!formData || !formData.email) {
       return {
         success: false,
-        error: 'Missing form data for admin notification',
-        code: 'MISSING_FORM_DATA'
+        error: 'Missing form data'
       };
     }
 
@@ -159,8 +113,7 @@ class EmailService {
     if (!adminEmail) {
       return {
         success: false,
-        error: 'No admin email configured',
-        code: 'NO_ADMIN_EMAIL'
+        error: 'No admin email configured'
       };
     }
 
@@ -170,36 +123,19 @@ class EmailService {
       subject: `New Contact: ${formData.subject || 'No Subject'}`,
       html: this.generateAdminNotificationTemplate(formData, ipAddress),
       text: this.generateAdminNotificationText(formData, ipAddress),
-      headers: {
-        'X-Priority': '1',
-        'X-MSMail-Priority': 'High',
-        'Importance': 'High'
-      }
     };
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('✅ Admin notification sent:', {
-        messageId: info.messageId,
-        from: formData.email.substring(0, 3) + '***'
-      });
-      
       return { 
         success: true, 
-        messageId: info.messageId,
-        accepted: info.accepted,
-        rejected: info.rejected
+        messageId: info.messageId
       };
     } catch (error) {
-      console.error('❌ Error sending admin notification:', {
-        error: error.message,
-        code: error.code
-      });
-      
+      console.error('Error sending admin notification:', error.message);
       return { 
         success: false, 
-        error: error.message,
-        code: error.code || 'SEND_FAILED'
+        error: error.message
       };
     }
   }
@@ -256,15 +192,6 @@ class EmailService {
             font-size: 14px;
             border-top: 1px solid #eee;
             padding-top: 20px;
-        }
-        .button {
-            display: inline-block;
-            padding: 12px 24px;
-            background: #667eea;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            margin: 10px 0;
         }
         @media only screen and (max-width: 600px) {
             .content { padding: 20px; }
@@ -379,15 +306,6 @@ This is an automated confirmation email. Please do not reply to this message.
             border-radius: 4px; 
             margin: 15px 0;
         }
-        .button {
-            display: inline-block;
-            padding: 10px 20px;
-            background: #dc3545;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            margin: 10px 0;
-        }
         @media only screen and (max-width: 600px) {
             .content { padding: 15px; }
         }
@@ -396,7 +314,7 @@ This is an automated confirmation email. Please do not reply to this message.
 <body>
     <div class="container">
         <div class="header">
-            <h1>📧 New Contact Form Submission</h1>
+            <h1>New Contact Form Submission</h1>
         </div>
         <div class="content">
             <div class="info-box">
@@ -413,7 +331,7 @@ This is an automated confirmation email. Please do not reply to this message.
                 <p>${safeMessage.replace(/\n/g, '<br>')}</p>
             </div>
             
-            <p><a class="button" href="mailto:${safeEmail}?subject=Re: ${safeSubject}">Reply to ${safeName}</a></p>
+            <p><a href="mailto:${safeEmail}?subject=Re: ${safeSubject}">Reply to ${safeName}</a></p>
         </div>
     </div>
 </body>
@@ -439,7 +357,6 @@ Reply to: ${formData.email}
     `.trim();
   }
 
-  // Utility function to escape HTML for security
   escapeHtml(text) {
     if (!text) return '';
     const map = {
@@ -452,24 +369,8 @@ Reply to: ${formData.email}
     return text.replace(/[&<>"']/g, m => map[m]);
   }
 
-// Method to check if email service is ready
-isReady() {
-  const status = this.isConfigured && this.transporter;
-  console.log('📧 Email service readiness check:', {
-    isConfigured: this.isConfigured,
-    hasTransporter: !!this.transporter,
-    overallReady: status
-  });
-  return status;
-}
-
-  // Method to get service status
-  getStatus() {
-    return {
-      isConfigured: this.isConfigured,
-      isReady: this.isReady(),
-      hasTransporter: !!this.transporter
-    };
+  isReady() {
+    return this.isConfigured && this.transporter;
   }
 }
 

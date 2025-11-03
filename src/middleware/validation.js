@@ -1,19 +1,6 @@
 const { body, validationResult } = require('express-validator');
 
 const validateContact = [
-  // Add debug logging to see what's being received
-  (req, res, next) => {
-    console.log('Validation middleware - received data:', {
-      name: req.body.name?.substring(0, 10),
-      email: req.body.email?.substring(0, 10),
-      subject: req.body.subject?.substring(0, 10),
-      messageLength: req.body.message?.length,
-      honeypot: req.body.honeypot,
-      timestamp: req.body.timestamp
-    });
-    next();
-  },
-  
   body('name')
     .trim()
     .isLength({ min: 2, max: 50 })
@@ -43,8 +30,7 @@ const validateContact = [
     .optional()
     .isLength({ max: 0 })
     .withMessage('Form submission error'),
-  
-  // Removed timestamp validation - just log it
+
   body('timestamp')
     .optional()
     .isNumeric()
@@ -54,8 +40,6 @@ const validateContact = [
     const errors = validationResult(req);
     
     if (!errors.isEmpty()) {
-      console.log('Validation errors:', errors.array());
-      
       const firstError = errors.array()[0];
       return res.status(400).json({
         success: false,
@@ -63,7 +47,6 @@ const validateContact = [
       });
     }
     
-    console.log('Validation passed');
     next();
   }
 ];
@@ -81,8 +64,6 @@ const validateStats = [
   (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      console.log('Stats validation failed:', errors.array());
-      
       return res.status(400).json({
         success: false,
         message: 'Invalid request parameters'

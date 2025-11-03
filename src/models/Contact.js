@@ -45,16 +45,14 @@ const contactSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes
+// Indexes for performance
 contactSchema.index({ email: 1, createdAt: -1 });
 contactSchema.index({ ipAddress: 1, createdAt: -1 });
 contactSchema.index({ isSpam: 1 });
 
-// Static method to check submission limits with connection check
+// Check submission limits
 contactSchema.statics.checkSubmissionLimit = async function(email, ipAddress, timeWindow = 24 * 60 * 60 * 1000) {
-  // Check if MongoDB is connected
   if (mongoose.connection.readyState !== 1) {
-    console.log('⚠️ MongoDB not connected, skipping submission limit check');
     return {
       emailCount: 0,
       ipCount: 0,
@@ -70,12 +68,12 @@ contactSchema.statics.checkSubmissionLimit = async function(email, ipAddress, ti
         email: email.toLowerCase(),
         createdAt: { $gte: twentyFourHoursAgo },
         isSpam: false
-      }),
+      }).maxTimeMS(5000),
       this.countDocuments({
         ipAddress: ipAddress,
         createdAt: { $gte: twentyFourHoursAgo },
         isSpam: false
-      })
+      }).maxTimeMS(5000)
     ]);
 
     return {
@@ -84,22 +82,19 @@ contactSchema.statics.checkSubmissionLimit = async function(email, ipAddress, ti
       isOverLimit: emailCount >= 3 || ipCount >= 5
     };
   } catch (error) {
-    console.error('❌ Error checking submission limits:', error.message);
-    // If there's a database error, don't block submissions
+    console.error('Error checking submission limits:', error.message);
     return {
       emailCount: 0,
       ipCount: 0,
-      isOverLimit: false,
-      error: error.message
+      isOverLimit: false
     };
   }
 };
 
-// Method to detect spam
+// Spam detection
 contactSchema.statics.calculateSpamScore = function(data) {
   let score = 0;
   
-  // Check for suspicious patterns
   const suspiciousKeywords = ['urgent', 'money', 'free', 'winner', 'prize', 'click here'];
   const message = (data.message + ' ' + data.subject).toLowerCase();
   
@@ -107,11 +102,9 @@ contactSchema.statics.calculateSpamScore = function(data) {
     if (message.includes(keyword)) score += 1;
   });
   
-  // Check for excessive capitals
   const capitalRatio = (data.message.match(/[A-Z]/g) || []).length / data.message.length;
   if (capitalRatio > 0.5) score += 2;
   
-  // Check for URLs
   const urlCount = (data.message.match(/https?:\/\/[^\s]+/g) || []).length;
   score += urlCount * 2;
   

@@ -8,10 +8,10 @@ const emailService = require('./utils/emailService');
 
 const app = express();
 
-// Initialize email service when app starts
+// Initialize services
 emailService.verifyTransporter();
 
-// Basic CORS - simple for testing
+// Security & CORS
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -23,90 +23,74 @@ app.use(cors({
 }));
 
 // Body parsing
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Simple MongoDB Connection for Vercel
+// Database connection
 const connectDB = async () => {
   if (!process.env.MONGODB_URI) {
-    console.error('❌ MONGODB_URI is not defined');
+    console.error('MongoDB URI not configured');
     return false;
   }
 
   try {
-    console.log('🔗 Connecting to MongoDB...');
-    
-    // Remove all deprecated options, keep it simple
-    const mongooseOptions = {
-      serverSelectionTimeoutMS: 10000, // 10 seconds
-      socketTimeoutMS: 45000, // 45 seconds
+    const options = {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
     };
 
-    await mongoose.connect(process.env.MONGODB_URI, mongooseOptions);
-    
-    console.log('✅ MongoDB connected successfully');
-    console.log('📊 MongoDB connection state:', mongoose.connection.readyState);
+    await mongoose.connect(process.env.MONGODB_URI, options);
+    console.log('MongoDB connected');
     return true;
-    
   } catch (error) {
-    console.error('❌ MongoDB connection failed:', error.message);
+    console.error('MongoDB connection failed:', error.message);
     return false;
   }
 };
 
-// Connect to MongoDB when app starts
 connectDB();
 
-// MongoDB connection events
-mongoose.connection.on('connected', () => {
-  console.log('✅ MongoDB connected event');
-});
-
+// Connection events
 mongoose.connection.on('error', (err) => {
-  console.error('❌ MongoDB connection error:', err.message);
+  console.error('MongoDB error:', err.message);
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.log('⚠️ MongoDB disconnected');
+  console.log('MongoDB disconnected');
 });
 
 // Routes
 app.use('/api/contact', contactRoutes);
 
 // Health check
-app.get('/api/health', async (req, res) => {
+app.get('/api/health', (req, res) => {
   const dbState = mongoose.connection.readyState;
-  const dbStates = {
-    0: 'disconnected',
-    1: 'connected', 
-    2: 'connecting',
-    3: 'disconnecting'
-  };
+  const status = dbState === 1 ? 'connected' : 'disconnected';
   
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    mongodb: dbStates[dbState] || 'unknown',
-    readyState: dbState
+    database: status
   });
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
+  res.status(404).json({ error: 'Resource not found' });
 });
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('Error:', err.message);
-  res.status(500).json({ error: 'Something went wrong' });
+  console.error('Server error:', err.message);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 module.exports = app;
 
+// Local development server
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
