@@ -44,28 +44,11 @@ const validateContact = [
     .isLength({ max: 0 })
     .withMessage('Form submission error'),
   
+  // Removed timestamp validation - just log it
   body('timestamp')
+    .optional()
     .isNumeric()
-    .withMessage('Invalid form data')
-    .custom((value, { req }) => {
-      const submissionTime = parseInt(value);
-      const currentTime = Date.now();
-      const timeDiff = currentTime - submissionTime;
-      
-      if (timeDiff < 0) {
-        throw new Error('Invalid submission timing');
-      }
-      
-      if (timeDiff < 2000) {
-        throw new Error('Please take more time to fill out the form');
-      }
-      
-      if (timeDiff > 3600000) {
-        throw new Error('Form session expired. Please refresh and try again.');
-      }
-      
-      return true;
-    }),
+    .withMessage('Invalid form data'),
 
   (req, res, next) => {
     const errors = validationResult(req);
@@ -109,7 +92,6 @@ const validateStats = [
   }
 ];
 
-// Make sure to export the functions
 module.exports = {
   validateContact,
   validateStats
