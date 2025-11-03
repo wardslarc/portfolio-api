@@ -50,28 +50,49 @@ contactSchema.index({ email: 1, createdAt: -1 });
 contactSchema.index({ ipAddress: 1, createdAt: -1 });
 contactSchema.index({ isSpam: 1 });
 
-// Static method to check submission limits
+// Static method to check submission limits with connection check
 contactSchema.statics.checkSubmissionLimit = async function(email, ipAddress, timeWindow = 24 * 60 * 60 * 1000) {
+  // Check if MongoDB is connected
+  if (mongoose.connection.readyState !== 1) {
+    console.log('⚠️ MongoDB not connected, skipping submission limit check');
+    return {
+      emailCount: 0,
+      ipCount: 0,
+      isOverLimit: false
+    };
+  }
+
   const twentyFourHoursAgo = new Date(Date.now() - timeWindow);
   
-  const [emailCount, ipCount] = await Promise.all([
-    this.countDocuments({
-      email: email.toLowerCase(),
-      createdAt: { $gte: twentyFourHoursAgo },
-      isSpam: false
-    }),
-    this.countDocuments({
-      ipAddress: ipAddress,
-      createdAt: { $gte: twentyFourHoursAgo },
-      isSpam: false
-    })
-  ]);
+  try {
+    const [emailCount, ipCount] = await Promise.all([
+      this.countDocuments({
+        email: email.toLowerCase(),
+        createdAt: { $gte: twentyFourHoursAgo },
+        isSpam: false
+      }),
+      this.countDocuments({
+        ipAddress: ipAddress,
+        createdAt: { $gte: twentyFourHoursAgo },
+        isSpam: false
+      })
+    ]);
 
-  return {
-    emailCount,
-    ipCount,
-    isOverLimit: emailCount >= 3 || ipCount >= 5
-  };
+    return {
+      emailCount,
+      ipCount,
+      isOverLimit: emailCount >= 3 || ipCount >= 5
+    };
+  } catch (error) {
+    console.error('❌ Error checking submission limits:', error.message);
+    // If there's a database error, don't block submissions
+    return {
+      emailCount: 0,
+      ipCount: 0,
+      isOverLimit: false,
+      error: error.message
+    };
+  }
 };
 
 // Method to detect spam
