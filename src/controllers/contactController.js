@@ -1,27 +1,7 @@
 const Contact = require('../models/Contact');
 const emailService = require('../utils/emailService');
 
-// Helper function to set CORS headers
-const setCorsHeaders = (req, res) => {
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
-    'http://localhost:3000',
-    'https://carlsdaleescalo.com',
-    'http://localhost:5173'
-  ];
-  
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-};
-
 const submitContact = async (req, res) => {
-  // Set CORS headers for the response
-  setCorsHeaders(req, res);
-
   try {
     const { name, email, subject, message, honeypot, timestamp } = req.body;
 
@@ -114,7 +94,7 @@ const submitContact = async (req, res) => {
       success: true,
       message: 'Thank you for your message! I\'ll get back to you as soon as possible.',
       isSpam,
-      emailSent: !isSpam // Indicate if confirmation email was sent
+      emailSent: !isSpam
     });
 
   } catch (error) {
@@ -126,9 +106,6 @@ const submitContact = async (req, res) => {
 };
 
 const getSubmissionStats = async (req, res) => {
-  // Set CORS headers for the response
-  setCorsHeaders(req, res);
-
   try {
     const { email, ipAddress } = req.query;
     

@@ -6,6 +6,7 @@ const mongoSanitize = require('express-mongo-sanitize');
 require('dotenv').config();
 
 const contactRoutes = require('./routes/contact');
+// FIXED: Correct the import path - remove one level since we're already in src folder
 const emailService = require('./utils/emailService');
 
 const app = express();
@@ -13,26 +14,23 @@ const app = express();
 // Initialize email service when app starts
 emailService.verifyTransporter();
 
-// Handle OPTIONS requests first
-app.options('*', cors());
-
-// Security middleware
-app.use(helmet());
-
 // Enhanced CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
   'http://localhost:3000',
   'https://carlsdaleescalo.com',
-  'http://localhost:5173',
-  'https://carlsdaleescalo.vercel.app' // Add your Vercel frontend if you have one
+  'http://localhost:5173'
 ];
 
+// Security middleware
+app.use(helmet());
+
+// CORS middleware - apply to all routes
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.log('Blocked by CORS:', origin);
@@ -54,7 +52,7 @@ app.use(mongoSanitize());
 // Routes
 app.use('/api/contact', contactRoutes);
 
-// Health check with CORS headers
+// Health check
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
@@ -67,6 +65,14 @@ app.get('/api/health', (req, res) => {
 // Simple error handling
 app.use((err, req, res, next) => {
   console.error('Error:', err);
+  
+  // CORS error handling
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ 
+      error: 'CORS policy: Origin not allowed' 
+    });
+  }
+  
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
@@ -97,5 +103,6 @@ if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`🌐 Allowed origins:`, allowedOrigins);
   });
 }
