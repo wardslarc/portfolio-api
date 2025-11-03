@@ -2,10 +2,10 @@ const nodemailer = require('nodemailer');
 
 class EmailService {
   constructor() {
-    this.transporter = nodemailer.createTransporter({
+    this.transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST,
       port: process.env.EMAIL_PORT,
-      secure: false, // true for 465, false for other ports
+      secure: process.env.EMAIL_PORT == 465, // true for 465, false for other ports
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -13,17 +13,16 @@ class EmailService {
     });
   }
 
-  // Verify transporter configuration
   async verifyTransporter() {
     try {
       await this.transporter.verify();
-      console.log('Email transporter is ready');
+      console.log('✅ Email transporter is ready');
     } catch (error) {
-      console.error('Email transporter error:', error);
+      console.error('❌ Email transporter error:', error.message);
+      console.log('💡 Check your .env email configuration');
     }
   }
 
-  // Send confirmation email to the user who submitted the form
   async sendConfirmationEmail(userEmail, userName, formData) {
     const mailOptions = {
       from: `"${process.env.FROM_NAME}" <${process.env.FROM_EMAIL}>`,
@@ -34,29 +33,28 @@ class EmailService {
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('Confirmation email sent:', info.messageId);
+      console.log('✅ Confirmation email sent:', info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
-      console.error('Error sending confirmation email:', error);
+      console.error('❌ Error sending confirmation email:', error.message);
       return { success: false, error: error.message };
     }
   }
 
-  // Send notification email to admin
   async sendAdminNotification(formData, ipAddress) {
     const mailOptions = {
       from: `"${process.env.FROM_NAME}" <${process.env.FROM_EMAIL}>`,
-      to: process.env.FROM_EMAIL, // Send to yourself/admin
+      to: process.env.FROM_EMAIL,
       subject: `New Contact Form Submission from ${formData.name}`,
       html: this.generateAdminNotificationTemplate(formData, ipAddress),
     };
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('Admin notification sent:', info.messageId);
+      console.log('✅ Admin notification sent:', info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
-      console.error('Error sending admin notification:', error);
+      console.error('❌ Error sending admin notification:', error.message);
       return { success: false, error: error.message };
     }
   }
