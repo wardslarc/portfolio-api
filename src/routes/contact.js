@@ -1,6 +1,6 @@
 const express = require('express');
 const { submitContact, getSubmissionStats } = require('../controllers/contactController');
-const { validateContact } = require('../middleware/Validation');
+const { validateContact } = require('../middleware/validation'); // lowercase
 
 const router = express.Router();
 
