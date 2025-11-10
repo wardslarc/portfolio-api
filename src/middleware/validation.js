@@ -1,5 +1,4 @@
 const { body, validationResult, query } = require('express-validator');
-
 const validateContact = [
   body('name')
     .trim()
@@ -37,7 +36,6 @@ const validateContact = [
     .withMessage('Message is required')
     .isLength({ min: 10, max: 1000 })
     .withMessage('Message must be between 10 and 1000 characters')
-    // Allow more characters for message content
     .matches(/^[a-zA-Z0-9\s\-_.,!?()@#$%^&*+=<>[\]{}:;'"\\|/`~]+$/)
     .withMessage('Message contains invalid characters')
     .escape(),
@@ -47,38 +45,10 @@ const validateContact = [
     .isLength({ max: 0 })
     .withMessage('Form submission error'),
 
-  body('timestamp')
-    .optional()
-    .isNumeric()
-    .withMessage('Invalid form data')
-    .custom((value) => {
-      const now = Date.now();
-      const fiveMinutesAgo = now - (5 * 60 * 1000);
-      const fiveMinutesFromNow = now + (5 * 60 * 1000);
-      
-      // Check if timestamp is within reasonable bounds (not too old or future)
-      if (value < fiveMinutesAgo || value > fiveMinutesFromNow) {
-        throw new Error('Form submission timeout');
-      }
-      return true;
-    }),
-
-  // Form submission timing protection
-  body().custom((value, { req }) => {
-    const startTime = req._startTime || Date.now();
-    const processingTime = Date.now() - startTime;
-    
-    // If form was processed too quickly, likely a bot
-    if (processingTime < 500) {
-      throw new Error('Form submission too fast');
-    }
-    return true;
-  }),
+  // Remove timestamp validation entirely
+  // Remove form submission timing validation
 
   (req, res, next) => {
-    // Store start time for timing analysis
-    req._startTime = Date.now();
-    
     const errors = validationResult(req);
     
     if (!errors.isEmpty()) {
@@ -94,7 +64,6 @@ const validateContact = [
       return res.status(400).json({
         success: false,
         message: firstError.msg,
-        // Don't expose all errors in production to avoid information leakage
         ...(process.env.NODE_ENV !== 'production' && {
           details: errors.array()
         })
