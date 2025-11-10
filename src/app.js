@@ -134,7 +134,7 @@ app.get('/api', (req, res) => {
   res.json({
     name: 'Portfolio API',
     version: '1.0.0',
-    description: 'API for Carlsdale Escalo Portfolio',
+    description: 'API for Carls Dale Escalo Portfolio',
     endpoints: {
       contact: '/api/contact',
       health: '/api/health'
