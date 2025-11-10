@@ -1,23 +1,14 @@
 const Contact = require('../models/Contact');
 const emailService = require('../utils/emailService');
-const mongoose = require('mongoose');
+const database = require('../config/database'); // Import centralized DB
 
 // Database connection helper for serverless environment
 const ensureDBConnection = async () => {
-  if (mongoose.connection.readyState === 1) return true;
+  // Use the centralized database connection
+  if (database.isConnected) return true;
 
   try {
-    if (mongoose.connection.readyState !== 0) {
-      await mongoose.connection.close();
-    }
-    
-    await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 30000,
-      maxPoolSize: 5,
-      minPoolSize: 1
-    });
-    
+    await database.connect();
     return true;
   } catch (error) {
     console.error('Database connection failed:', error.message);
@@ -25,7 +16,7 @@ const ensureDBConnection = async () => {
   }
 };
 
-// Input validation and sanitization
+// Input validation and sanitization (unchanged)
 const validateContactInput = (data) => {
   const { name, email, subject, message, honeypot } = data;
   const errors = [];
@@ -61,7 +52,7 @@ const validateContactInput = (data) => {
 };
 
 const submitContact = async (req, res) => {
-  // Early honeypot check
+  // Early honeypot check (redundant safety)
   if (req.body.honeypot && req.body.honeypot.length > 0) {
     return res.status(200).json({
       success: true,
@@ -69,7 +60,7 @@ const submitContact = async (req, res) => {
     });
   }
 
-  // Input validation
+  // Input validation (already handled by middleware, but keep as safety)
   const validation = validateContactInput(req.body);
   if (!validation.isValid) {
     return res.status(400).json({
@@ -80,11 +71,13 @@ const submitContact = async (req, res) => {
   }
 
   const { name, email, subject, message } = validation.sanitizedData;
-  const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
+  
+  // Use the IP from the middleware or fallback
+  const ipAddress = req.clientIp || req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || 'unknown';
   const userAgent = req.get('User-Agent') || 'Unknown';
 
   try {
-    // Ensure database connection
+    // Ensure database connection using centralized handler
     const isDbConnected = await ensureDBConnection();
 
     // Spam detection
@@ -113,10 +106,14 @@ const submitContact = async (req, res) => {
         const savedContact = await contact.save();
         savedContactId = savedContact._id;
         dbSuccess = true;
+        
+        console.log(`Contact form submission saved to database: ${savedContactId}`);
       } catch (saveError) {
         console.error('Database save error:', saveError.message);
         // Continue without database save - don't fail the entire request
       }
+    } else if (!isDbConnected) {
+      console.warn('Database not available, proceeding without saving contact to database');
     }
 
     // Send emails if not spam
@@ -126,10 +123,13 @@ const submitContact = async (req, res) => {
         await emailService.sendConfirmationEmail(email, name, { subject, message });
         await emailService.sendAdminNotification({ name, email, subject, message }, ipAddress);
         emailSuccess = true;
+        console.log('Contact form emails sent successfully');
       } catch (emailError) {
         console.error('Email sending error:', emailError.message);
         // Continue even if emails fail
       }
+    } else {
+      console.log('Contact form submission flagged as spam, skipping emails');
     }
 
     // Success response
@@ -138,7 +138,8 @@ const submitContact = async (req, res) => {
       message: 'Thank you for your message! I\'ll get back to you as soon as possible.',
       savedToDatabase: dbSuccess,
       emailSent: emailSuccess,
-      isSpam
+      isSpam,
+      submissionId: savedContactId
     });
 
   } catch (error) {
@@ -170,54 +171,95 @@ const getSubmissionStats = async (req, res) => {
   }
 
   try {
-    await ensureDBConnection();
+    const isDbConnected = await ensureDBConnection();
+    
+    if (!isDbConnected) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database temporarily unavailable'
+      });
+    }
+
     const stats = await Contact.checkSubmissionLimit(email, ipAddress);
     
     res.json({
       success: true,
       emailCount: stats.emailCount,
       ipCount: stats.ipCount,
-      remaining: Math.max(0, 3 - stats.emailCount)
+      remaining: Math.max(0, 3 - stats.emailCount),
+      databaseConnected: true
     });
   } catch (error) {
     console.error('Stats error:', error.message);
     res.status(500).json({ 
       success: false,
-      message: 'Failed to get submission stats' 
+      message: 'Failed to get submission stats',
+      databaseConnected: false
     });
   }
 };
 
 const getContactHealth = async (req, res) => {
   try {
-    const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+    // Use centralized database health check
+    const dbHealth = await database.healthCheck();
     const emailStatus = emailService.isReady ? emailService.isReady() : false;
     
-    const overallHealth = dbStatus === 'connected' && emailStatus;
+    const overallHealth = dbHealth.status === 'connected' && emailStatus;
     
     const healthResponse = {
       success: overallHealth,
       service: 'contact',
       status: overallHealth ? 'healthy' : 'unhealthy',
-      database: dbStatus,
+      database: dbHealth,
       emailService: emailStatus,
       timestamp: new Date().toISOString()
     };
 
     res.status(overallHealth ? 200 : 503).json(healthResponse);
   } catch (error) {
-    console.error('Health check error:', error.message);
+    console.error('Contact health check error:', error.message);
     res.status(503).json({
       success: false,
       service: 'contact',
       status: 'unhealthy',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      error: error.message
     });
+  }
+};
+
+// Additional utility function for contact-specific database operations
+const getContactMetrics = async () => {
+  try {
+    const isDbConnected = await ensureDBConnection();
+    
+    if (!isDbConnected) {
+      throw new Error('Database not available');
+    }
+
+    const totalSubmissions = await Contact.countDocuments();
+    const spamSubmissions = await Contact.countDocuments({ isSpam: true });
+    const recentSubmissions = await Contact.countDocuments({
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    });
+
+    return {
+      totalSubmissions,
+      spamSubmissions,
+      recentSubmissions,
+      legitimateSubmissions: totalSubmissions - spamSubmissions
+    };
+  } catch (error) {
+    console.error('Error getting contact metrics:', error.message);
+    return null;
   }
 };
 
 module.exports = {
   submitContact,
   getSubmissionStats,
-  getContactHealth
+  getContactHealth,
+  getContactMetrics,
+  ensureDBConnection // Export for testing or other modules
 };
