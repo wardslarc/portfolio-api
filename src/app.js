@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
 const compression = require('compression');
 require('dotenv').config();
 
@@ -10,6 +10,9 @@ const contactRoutes = require('./routes/contact');
 const emailService = require('./utils/emailService');
 
 const app = express();
+
+// Vercel proxy configuration
+app.set('trust proxy', true); // Trust all Vercel proxies
 
 // Security middleware
 app.use(helmet({
@@ -25,33 +28,20 @@ app.use(helmet({
   }
 }));
 
-// Production CORS - only allow your domains
-const allowedOrigins = [
-  'https://www.carlsdaleescalo.com',
-  'https://carlsdaleescalo.com'
-];
-
+// CORS configuration
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, postman)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.warn(`Blocked by CORS: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: [
+    'https://www.carlsdaleescalo.com',
+    'https://carlsdaleescalo.com'
+  ],
   credentials: true,
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400 // 24 hours
 };
-
 app.use(cors(corsOptions));
 
-// Rate limiting
+// Rate limiting with proper IPv6 handling
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
@@ -60,6 +50,12 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req, res) => {
+    // Use the built-in ipKeyGenerator for proper IPv6 handling
+    const { ipKeyGenerator } = require('express-rate-limit');
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+    return ipKeyGenerator(req, res, ip);
+  }
 });
 app.use('/api/', limiter);
 
@@ -69,6 +65,11 @@ const contactLimiter = rateLimit({
   max: 5, // 5 contact submissions per hour
   message: {
     error: 'Too many contact form submissions. Please try again later.'
+  },
+  keyGenerator: (req, res) => {
+    const { ipKeyGenerator } = require('express-rate-limit');
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+    return ipKeyGenerator(req, res, ip);
   }
 });
 app.use('/api/contact', contactLimiter);
@@ -173,7 +174,7 @@ app.get('/api', (req, res) => {
   res.json({
     name: 'Portfolio API',
     version: '1.0.0',
-    description: 'API for Carls Dale Escalo Portfolio',
+    description: 'API for Carlsdale Escalo Portfolio',
     endpoints: {
       contact: '/api/contact',
       health: '/api/health'
