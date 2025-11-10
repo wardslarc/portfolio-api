@@ -11,8 +11,6 @@ const database = require('./config/database');
 
 const app = express();
 
-// Vercel proxy configuration
-app.set('trust proxy', true);
 
 // Security middleware
 app.use(helmet({

@@ -17,11 +17,8 @@ router.use((req, res, next) => {
     timestamp: new Date().toISOString()
   });
   
-  // Store start time for request timing
-  req._startTime = Date.now();
   next();
 });
-
 // Contact form submission with comprehensive protection
 router.post('/submit', 
   validateRateLimit,                    // Additional rate limiting
@@ -120,25 +117,19 @@ router.use((error, req, res, next) => {
  */
 function enforceHoneypot(req, res, next) {
   // Check for common honeypot field names
-  const honeypotFields = ['honeypot', 'website', 'url', 'phone', 'company', 'confirm_email'];
+  const honeypotFields = ['honeypot', 'website', 'url', 'phone', 'company', 'confirm_email', '_hp'];
   const hasHoneypotData = honeypotFields.some(field => 
     req.body[field] && req.body[field].toString().trim().length > 0
   );
 
-  // Additional check for timing-based spam detection (quick form submission)
-  const submissionTime = Date.now();
-  const requestStartTime = req._startTime || submissionTime;
-  const timeToSubmit = submissionTime - requestStartTime;
-
-  // If form was submitted too quickly (less than 1 second), likely spam
-  const tooQuick = timeToSubmit < 1000;
-
-  if (hasHoneypotData || tooQuick) {
+  if (hasHoneypotData) {
     console.log('Honeypot triggered:', { 
-      hasHoneypotData, 
-      tooQuick, 
-      timeToSubmit,
-      ip: req.ip 
+      hasHoneypotData: true,
+      triggeredFields: honeypotFields.filter(field => 
+        req.body[field] && req.body[field].toString().trim().length > 0
+      ),
+      ip: req.ip,
+      userAgent: req.get('User-Agent')?.substring(0, 50)
     });
     
     // Return success to spam bots but don't process
